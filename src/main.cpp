@@ -6,6 +6,7 @@
 #include <vector>
 #include "Eigen-3.3/Eigen/Core"
 #include "Eigen-3.3/Eigen/QR"
+#include "Eigen-3.3/Eigen/LU"
 #include "MPC.h"
 #include "json.hpp"
 
@@ -50,11 +51,11 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   assert(order >= 1 && order <= xvals.size() - 1);
   Eigen::MatrixXd A(xvals.size(), order + 1);
 
-  for (int i = 0; i < xvals.size(); i++) {
+  for (int i = 0; i < xvals.size(); ++i) {
     A(i, 0) = 1.0;
   }
 
-  for (int j = 0; j < xvals.size(); j++) {
+  for (int j = 0; j < xvals.size(); ++j) {
     for (int i = 0; i < order; i++) {
       A(j, i + 1) = A(j, i) * xvals(j);
     }
@@ -98,13 +99,63 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
+
+          Eigen::VectorXd waypoints_x(ptsx.size());
+          Eigen::VectorXd waypoints_y(ptsy.size());
+          waypoints_x.fill(0.0);
+          waypoints_y.fill(0.0);
+
+          // Transform waypoints to be from car's perspective
+          // this means we can consider px = 0, py = 0, and psi = 0
+          // greatly simplifying future calculations
+          // Code adapted from:
+          // https://gamedev.stackexchange.com/questions/79765/how-do-i-convert-from-the-global-coordinate-space-to-a-local-space
+
+          // With expressions:
+          /*
+          for (unsigned int i = 0; i < ptsx.size(); i++) {
+            double dx = ptsx[i] - px;
+            double dy = ptsy[i] - py;
+            waypoints_x(i) = dx * cos(-psi) - dy * sin(-psi);
+            waypoints_y(i) = dx * sin(-psi) + dy * cos(-psi);
+          }
+          */
+
+          // Vectorized transformation
+          Eigen::MatrixXd T = Eigen::MatrixXd(3, 3);
+          double cos_theta = cos(psi);
+          double sin_theta = sin(psi);
+          T << cos_theta, -sin_theta, px,
+             sin_theta, cos_theta, py,
+             0, 0, 1;
+
+          // Transform world coordinates to vehicle coordinates
+          for (unsigned int i=0; i<ptsx.size(); ++i){
+            Eigen::VectorXd obser_vec = Eigen::VectorXd(3);
+            obser_vec << ptsx[i], ptsy[i], 1;
+            // Transform observations from particle's coordinate to map coordinate system
+            Eigen::VectorXd transformed = T.inverse() * obser_vec;
+            waypoints_x(i) = transformed(0);
+            waypoints_y(i) = transformed(1);
+          }
+
+          auto coeffs = polyfit(waypoints_x, waypoints_y, 3);
+          // polyeval(coeffs, 0) is equal to coeffs[0]
+          double cte = coeffs[0];
+          double epsi = -atan(coeffs[1]); // p
+
           double steer_value;
           double throttle_value;
+          Eigen::VectorXd state(6);
+          state << 0, 0, 0, v, cte, epsi;
+          auto sol = mpc.Solve(state, coeffs);
+          steer_value = sol[0];
+          throttle_value = sol[1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
+          msgJson["steering_angle"] = steer_value/deg2rad(25);
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 
@@ -113,6 +164,15 @@ int main() {
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
+
+          for (unsigned int i=2; i<sol.size(); ++i){
+            if (i%2 == 0) {
+              mpc_x_vals.push_back(sol[i]);
+            }
+            else {
+              mpc_y_vals.push_back(sol[i]);
+            }
+          }
 
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
@@ -123,6 +183,12 @@ int main() {
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
+
+          unsigned int num_points = 30;
+          for (unsigned int i=0; i<num_points; i+=3){
+            next_x_vals.push_back(i);
+            next_y_vals.push_back(polyeval(coeffs, i));
+          }
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
