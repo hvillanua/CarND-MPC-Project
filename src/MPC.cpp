@@ -6,7 +6,7 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-size_t N = 10;
+size_t N = 20;
 double dt = 0.1;
 
 // This value assumes the model presented in the classroom is used.
@@ -22,19 +22,26 @@ double dt = 0.1;
 const double Lf = 2.67;
 const double EPS = 0.00001;
 
-// Both the reference cross track and orientation errors are 0.
-// The reference velocity is set to 40 mph.
-
-/*
-// Normal setup
-const double ref_v = 70;
-const unsigned int err_coeffs[7] = {100, 100, 20, 20, 70, 40, 40};
-*/
+const double ref_v = 70*0.447;
+// State dependent
+const double CTE_W = 2.5;
+const double EPS_W = 1.5;
+const double V_W = 1;
+// Euclidean distance
+const double EUC_W = 1;
+// Actuators
+const double DELTA_W = 12000;
+const double A_W = 1;
+// High speed and high steering
+const double CURVE_W = 45;
+// Sequential actuators
+const double DELTA_GAP_W = 2000;
+const double A_GAP_W = 100;
 
 
 // Speed setup
-const double ref_v = 100;
-const unsigned int err_coeffs[7] = {110, 110, 5, 5, 260, 100, 40};
+//const double ref_v = 100;
+//const unsigned int err_coeffs[7] = {110, 110, 5, 5, 260, 100, 40};
 
 
 // Reference indices
@@ -63,30 +70,32 @@ class FG_eval {
 
     // The part of the cost based on the reference state.
     for (unsigned int t = 0; t < N; ++t) {
-      fg[0] += err_coeffs[0]*CppAD::pow(vars[cte_start + t], 2);
-      fg[0] += err_coeffs[1]*CppAD::pow(vars[epsi_start + t], 2);
+      fg[0] += CTE_W*CppAD::pow(vars[cte_start + t], 2);
+      fg[0] += EPS_W*CppAD::pow(vars[epsi_start + t], 2);
       // Penalize for not following reference velocity
-      fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
+      fg[0] += V_W*CppAD::pow(vars[v_start + t] - ref_v, 2);
     }
     // Penalize according to distance to destination to avoid stop due to 0 loss
+
     auto val = CppAD::sqrt(CppAD::pow(vars[x_start] - vars[x_start + N-1], 2) +
         CppAD::pow(vars[y_start] - vars[y_start + N-1], 2));
     val = (val<EPS) ? EPS : val;
-    fg[0] += val;
+    fg[0] += EUC_W*val;
+
 
 
     // Minimize the use of actuators.
     for (unsigned int t = 0; t < N - 1; ++t) {
-      fg[0] += err_coeffs[2]*CppAD::pow(vars[delta_start + t], 2);
-      fg[0] += err_coeffs[3]*CppAD::pow(vars[a_start + t], 2);
+      fg[0] += DELTA_W*CppAD::pow(vars[delta_start + t], 2);
+      fg[0] += A_W*CppAD::pow(vars[a_start + t], 2);
       //Penalize for high velocity with high steering angles
-      fg[0] += err_coeffs[4]*CppAD::pow(vars[delta_start + t] * vars[v_start + t], 2);
+      fg[0] += CURVE_W*CppAD::pow(vars[delta_start + t] * vars[v_start + t], 2);
     }
 
     // Minimize the value gap between sequential actuations.
     for (unsigned int t = 0; t < N - 2; ++t) {
-      fg[0] += err_coeffs[5]*CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
-      fg[0] += err_coeffs[6]*CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+      fg[0] += DELTA_GAP_W*CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+      fg[0] += A_GAP_W*CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
     }
 
     //
@@ -125,18 +134,8 @@ class FG_eval {
       AD<double> epsi0 = vars[epsi_start + t - 1];
 
       // Only consider the actuation at time t.
-      AD<double> delta0;
-      AD<double> a0;
-      // Take latency (100 ms) into account, since latency is equal to dt
-      // we will take into account the actuator at t-2 instead of t-1
-      if (t>1){
-        delta0 = vars[delta_start + t - 2];
-        a0 = vars[a_start + t - 2];
-      }
-      else{
-        delta0 = vars[delta_start + t - 1];
-        a0 = vars[a_start + t - 1];
-      }
+      AD<double> delta0 = vars[delta_start + t - 1];
+      AD<double> a0 = vars[a_start + t - 1];
 
       // Evaluate f(x) being a 3rd degree polynomial
       AD<double> f0 = coeffs[0] + coeffs[1] * x0 + coeffs[2] * CppAD::pow(x0, 2) + coeffs[3] * CppAD::pow(x0, 3);
@@ -158,7 +157,7 @@ class FG_eval {
       fg[1 + psi_start + t] = psi1 - (psi0 - v0 * delta0 / Lf * dt);
       fg[1 + v_start + t] = v1 - (v0 + a0 * dt);
       fg[1 + cte_start + t] = cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
-      fg[1 + epsi_start + t] = epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
+      fg[1 + epsi_start + t] = epsi1 - ((psi0 - psides0) - v0 * delta0 / Lf * dt);
     }
 
   }

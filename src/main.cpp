@@ -18,6 +18,10 @@ constexpr double pi() { return M_PI; }
 double deg2rad(double x) { return x * pi() / 180; }
 double rad2deg(double x) { return x * 180 / pi(); }
 
+// Define latency and Lf
+const unsigned int latency = 0.1;
+const double Lf = 2.67;
+
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
 // else the empty string "" will be returned.
@@ -92,13 +96,8 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
-
-          /*
-          * TODO: Calculate steering angle and throttle using MPC.
-          *
-          * Both are in between [-1, 1].
-          *
-          */
+          double delta = j[1]["steering_angle"];
+          double a = j[1]["throttle"];
 
           Eigen::VectorXd waypoints_x(ptsx.size());
           Eigen::VectorXd waypoints_y(ptsy.size());
@@ -141,13 +140,30 @@ int main() {
 
           auto coeffs = polyfit(waypoints_x, waypoints_y, 3);
           // polyeval(coeffs, 0) is equal to coeffs[0]
-          double cte = coeffs[0];
-          double epsi = -atan(coeffs[1]); // p
+
+          // Apply kinematic model to predict vehicle state after latency
+
+          // Initial state in car coordinates
+          const double x0 = 0;
+          const double y0 = 0;
+          const double psi0 = 0;
+          const double cte0 = coeffs[0];
+          const double epsi0 = -atan(coeffs[1]);
+
+          // State after delay.
+          // Convert miles per hour to meter per second
+          v *= 0.447;
+          double x_delay = x0 + v * cos(psi0) * latency;
+          double y_delay = y0 + v * sin(psi0) * latency;
+          double psi_delay = psi0 - v * delta * latency / Lf;
+          double v_delay = v + a * latency;
+          double cte_delay = cte0 + v * sin(epsi0) * latency;
+          double epsi_delay = epsi0 - v * delta * latency / Lf;
 
           double steer_value;
           double throttle_value;
           Eigen::VectorXd state(6);
-          state << 0, 0, 0, v, cte, epsi;
+          state << x_delay, y_delay, psi_delay, v_delay, cte_delay, epsi_delay;
           auto sol = mpc.Solve(state, coeffs);
           steer_value = sol[0];
           throttle_value = sol[1];

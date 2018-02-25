@@ -36,20 +36,20 @@ The cost function consist of the following factors:
 
 ### Timestep Length and Elapsed Duration (N & dt)
 
-I ended up with `N = 10` and `dt = 0.1` after trying some combinations. Lower `N` values didn't provide enough prediction value to get
-good performance. Higher `N` values were prone to errors when dt decreased, as they introduced more actuations that ended up
-impacting the performance poorly.
+I ended up with `N = 20` and `dt = 0.1` after trying some combinations. Lower `N` values didn't provide enough prediction value to get
+good performance. Higher `N` values take into account multiple future possibilities, the problem is it requires more computational power to use.
+In a real life scenario it's unlikely that we use high `N` values since it would be impossible to predict other elements such as other cars changing lanes,
+accidents, etc.
+Low `dt` values let us have more actuations but reduce the time horizon, as well as being more computationally expensive. The opposite applies to high `dt` values.
+A balance has to be found such that the time horizon is large enough to predict future events without being too computationally expensive, but not
+large enough that calculations further in the time horizon carry high uncertainty.
 
 ### Polynomial Fitting and MPC Preprocessing
 I transformed the waypoints to the car local coordinate system, thus making calculations easier, since the state vector always has `x=0` and `y=0`.
 As suggested during the lesson, I fit a third degree polynomial to the waypoints since it will correctly fit most trajectories found in real life scenarios.
 
 ### Model Predictive Control with Latency
-The latency was handled by updating `delta` and `a` with values from 2 `dt` before, since in our case `dt == latency`.
+The kinematic model was used to calculate the next state after the initial. The new state was then fed to the solver to account for latency.
 
 ### The vehicle must successfully drive a lap around the track.
-Two set of parameters were given to the MPC, one for regular driving, and another one for higher speed.
-
-https://youtu.be/Ch510mfFka4
-
-https://youtu.be/emvfmp_d8Wo
+https://youtu.be/aC8y3Pf3s80
